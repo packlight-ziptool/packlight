@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.py[cod]
+.pycache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Local ZIP output and release-loop artifacts.
+*.zip
+reports/latest-demo.zip
+reports/latest-loop.json
+reports/*
+!reports/.gitignore
