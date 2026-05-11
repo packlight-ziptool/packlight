@@ -49,7 +49,7 @@ def main(argv=None) -> int:
                 str(fixture),
                 "--output",
                 str(output),
-                "--release",
+                "--verified",
                 "--force",
                 "--json",
             ]
@@ -95,10 +95,10 @@ def _inspect_zip(output: Path):
             roots = {entry.split("/", 1)[0] for entry in entries if entry.strip("/")}
             if roots != {"Loop Fixture"}:
                 errors.append(f"Unexpected top-level roots: {sorted(roots)}")
-            if "Loop Fixture/MANIFEST.txt" not in entries:
-                errors.append("Missing manifest")
-            if "Loop Fixture/SHA256SUMS" not in entries:
-                errors.append("Missing checksums")
+            if "Loop Fixture/MANIFEST.txt" in entries:
+                errors.append("Unexpected manifest")
+            if "Loop Fixture/SHA256SUMS" in entries:
+                errors.append("Unexpected checksums")
     except Exception as error:  # pragma: no cover - loop reporting path
         errors.append(str(error))
 

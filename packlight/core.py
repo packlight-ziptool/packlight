@@ -28,7 +28,9 @@ class PacklightOptions:
     source: Path
     output: Optional[Path] = None
     root_name: Optional[str] = None
+    verified: bool = False
     release: bool = False
+    audit_files: bool = False
     strict: bool = False
     dry_run: bool = False
     force: bool = False
@@ -36,8 +38,12 @@ class PacklightOptions:
     exclude_patterns: Tuple[str, ...] = ()
 
     @property
+    def verified_effective(self) -> bool:
+        return self.verified or self.release or self.audit_files
+
+    @property
     def strict_effective(self) -> bool:
-        return self.strict or self.release
+        return self.strict or self.verified_effective
 
 
 @dataclass
@@ -88,7 +94,9 @@ class BuildResult:
     source: str
     output: Optional[str]
     root_name: str
+    verified: bool
     release: bool
+    audit_files: bool
     dry_run: bool
     files: List[FileRecord]
     skipped: List[SkippedItem]
@@ -103,7 +111,9 @@ class BuildResult:
             "source": self.source,
             "output": self.output,
             "root_name": self.root_name,
+            "verified": self.verified,
             "release": self.release,
+            "audit_files": self.audit_files,
             "dry_run": self.dry_run,
             "file_count": len(self.files),
             "total_bytes": self.total_bytes,
@@ -143,6 +153,7 @@ def _build_clean_zip(options: PacklightOptions) -> BuildResult:
 
     root_name = _resolve_root_name(source, options.root_name)
     output = _resolve_output_path(source, options.output)
+    verified = options.verified_effective
 
     if output and output.exists() and not options.force and not options.dry_run:
         raise PacklightError(f"Output already exists. Re-run with --force to replace it: {output}")
@@ -154,13 +165,13 @@ def _build_clean_zip(options: PacklightOptions) -> BuildResult:
         more = "" if len(risky) <= 20 else f"\n...and {len(risky) - 20} more"
         raise PacklightError(f"Refusing to build because risky files were found:\n{details}{more}")
 
-    if options.release:
+    if options.audit_files:
         generated_conflicts = sorted(
             item.rel_path for item in scan.files if item.rel_path in {MANIFEST_NAME, CHECKSUMS_NAME}
         )
         if generated_conflicts:
             names = ", ".join(generated_conflicts)
-            raise PacklightError(f"Release mode reserves generated file name(s): {names}")
+            raise PacklightError(f"Audit files reserve generated file name(s): {names}")
 
     if not scan.files:
         raise PacklightError("No files would be included in the ZIP.")
@@ -169,7 +180,7 @@ def _build_clean_zip(options: PacklightOptions) -> BuildResult:
         FileRecord(rel_path=item.rel_path, size=item.size, sha256="")
         for item in scan.files
     ]
-    if options.release:
+    if options.audit_files:
         planned_records.extend(
             [
                 FileRecord(rel_path=MANIFEST_NAME, size=0, sha256=""),
@@ -182,7 +193,9 @@ def _build_clean_zip(options: PacklightOptions) -> BuildResult:
             source=str(source),
             output=str(output) if output else None,
             root_name=root_name,
-            release=options.release,
+            verified=verified,
+            release=verified,
+            audit_files=options.audit_files,
             dry_run=True,
             files=planned_records,
             skipped=scan.skipped,
@@ -200,28 +213,32 @@ def _build_clean_zip(options: PacklightOptions) -> BuildResult:
         payload_records = _copy_payload(scan.files, staging_root)
         final_records = list(payload_records)
 
-        if options.release:
+        if options.audit_files:
             manifest_record = _write_manifest(staging_root, root_name, payload_records)
             final_records.append(manifest_record)
             checksums_record = _write_checksums(staging_root, final_records)
             final_records.append(checksums_record)
 
         _write_zip(staging_root, output, root_name)
-        verification = verify_zip(
-            output,
-            expected_root=root_name,
-            release=options.release,
-            allow_patterns=options.allow_patterns,
-            exclude_patterns=options.exclude_patterns,
-        )
-        if not verification.ok:
-            raise PacklightError("Verification failed:\n" + "\n".join(verification.errors))
+        verification = None
+        if verified:
+            verification = verify_zip(
+                output,
+                expected_root=root_name,
+                audit_files=options.audit_files,
+                allow_patterns=options.allow_patterns,
+                exclude_patterns=options.exclude_patterns,
+            )
+            if not verification.ok:
+                raise PacklightError("Verification failed:\n" + "\n".join(verification.errors))
 
     return BuildResult(
         source=str(source),
         output=str(output),
         root_name=root_name,
-        release=options.release,
+        verified=verified,
+        release=verified,
+        audit_files=options.audit_files,
         dry_run=False,
         files=final_records,
         skipped=scan.skipped,
@@ -292,10 +309,14 @@ def verify_zip(
     zip_path: Path,
     *,
     expected_root: str,
-    release: bool,
+    audit_files: bool = False,
+    release: Optional[bool] = None,
     allow_patterns: Sequence[str] = (),
     exclude_patterns: Sequence[str] = (),
 ) -> VerificationResult:
+    if release is not None:
+        audit_files = release
+
     checks: List[str] = []
     errors: List[str] = []
 
@@ -345,10 +366,10 @@ def verify_zip(
             package_root = extract_root / expected_root
             if not package_root.is_dir():
                 errors.append(f"Extracted root folder missing: {expected_root}")
-            elif release:
-                errors.extend(_verify_release_files(package_root))
+            elif audit_files:
+                errors.extend(_verify_audit_files(package_root))
                 if not errors:
-                    checks.append("manifest-and-checksums")
+                    checks.append("audit-files")
 
     return VerificationResult(ok=not errors, checks=checks, errors=errors)
 
@@ -379,7 +400,7 @@ def _write_manifest(staging_root: Path, root_name: str, payload_records: Sequenc
         "Packlight Manifest",
         f"Root: {root_name}",
         f"Generated: {generated}",
-        "Mode: release",
+        "Mode: verified",
         f"Files: {len(payload_records)}",
         f"Bytes: {total_bytes}",
         f"Checksums: {CHECKSUMS_NAME}",
@@ -456,7 +477,7 @@ def _write_file_entry(archive: zipfile.ZipFile, source: Path, arcname: str) -> N
             shutil.copyfileobj(input_file, output_file)
 
 
-def _verify_release_files(package_root: Path) -> List[str]:
+def _verify_audit_files(package_root: Path) -> List[str]:
     errors: List[str] = []
     package_root = package_root.resolve()
     manifest = package_root / MANIFEST_NAME

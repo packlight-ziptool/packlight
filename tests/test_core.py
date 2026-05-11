@@ -9,25 +9,27 @@ from packlight.core import CHECKSUMS_NAME, MANIFEST_NAME, PacklightError, Packli
 
 
 class PacklightTests(unittest.TestCase):
-    def test_release_mode_builds_clean_verified_zip(self):
+    def test_verified_builds_clean_verified_zip(self):
         with tempfile.TemporaryDirectory() as temp_root:
             source = Path(temp_root) / "Client Release"
             _write_fixture(source, include_secret=False)
             output = Path(temp_root) / "client-release.zip"
 
-            result = build_clean_zip(PacklightOptions(source=source, output=output, release=True))
+            result = build_clean_zip(PacklightOptions(source=source, output=output, verified=True))
 
             self.assertTrue(output.is_file())
             self.assertTrue(result.verification.ok)
+            self.assertTrue(result.verified)
             self.assertEqual(result.root_name, "Client Release")
-            self.assertIn("manifest-and-checksums", result.verification.checks)
+            self.assertFalse(result.audit_files)
+            self.assertNotIn("audit-files", result.verification.checks)
 
             with zipfile.ZipFile(output) as archive:
                 names = archive.namelist()
 
             self.assertEqual({name.split("/", 1)[0] for name in names if name.strip("/")}, {"Client Release"})
-            self.assertIn(f"Client Release/{MANIFEST_NAME}", names)
-            self.assertIn(f"Client Release/{CHECKSUMS_NAME}", names)
+            self.assertNotIn(f"Client Release/{MANIFEST_NAME}", names)
+            self.assertNotIn(f"Client Release/{CHECKSUMS_NAME}", names)
             self.assertIn("Client Release/README.md", names)
             self.assertIn("Client Release/docs/contract notes.txt", names)
             self.assertNotIn("Client Release/.DS_Store", names)
@@ -36,19 +38,39 @@ class PacklightTests(unittest.TestCase):
             self.assertNotIn("Client Release/debug.log", names)
             self.assertNotIn("Client Release/old.zip", names)
 
-    def test_release_mode_refuses_secret_like_files(self):
+    def test_audit_files_are_opt_in(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            source = Path(temp_root) / "Client Release"
+            _write_fixture(source, include_secret=False)
+            output = Path(temp_root) / "client-release.zip"
+
+            result = build_clean_zip(PacklightOptions(source=source, output=output, verified=True, audit_files=True))
+
+            self.assertTrue(output.is_file())
+            self.assertTrue(result.verification.ok)
+            self.assertTrue(result.verified)
+            self.assertTrue(result.audit_files)
+            self.assertIn("audit-files", result.verification.checks)
+
+            with zipfile.ZipFile(output) as archive:
+                names = archive.namelist()
+
+            self.assertIn(f"Client Release/{MANIFEST_NAME}", names)
+            self.assertIn(f"Client Release/{CHECKSUMS_NAME}", names)
+
+    def test_verified_refuses_secret_like_files(self):
         with tempfile.TemporaryDirectory() as temp_root:
             source = Path(temp_root) / "Risky"
             _write_fixture(source, include_secret=True)
             output = Path(temp_root) / "risky.zip"
 
             with self.assertRaises(PacklightError) as context:
-                build_clean_zip(PacklightOptions(source=source, output=output, release=True))
+                build_clean_zip(PacklightOptions(source=source, output=output, verified=True))
 
             self.assertIn(".env", str(context.exception))
             self.assertFalse(output.exists())
 
-    def test_release_mode_refuses_env_even_when_allowed(self):
+    def test_verified_refuses_env_even_when_allowed(self):
         with tempfile.TemporaryDirectory() as temp_root:
             source = Path(temp_root) / "AllowedRisk"
             source.mkdir()
@@ -61,7 +83,7 @@ class PacklightTests(unittest.TestCase):
                     PacklightOptions(
                         source=source,
                         output=output,
-                        release=True,
+                        verified=True,
                         allow_patterns=(".env",),
                     )
                 )
@@ -69,7 +91,7 @@ class PacklightTests(unittest.TestCase):
             self.assertIn(".env", str(context.exception))
             self.assertFalse(output.exists())
 
-    def test_release_mode_refuses_env_even_when_excluded(self):
+    def test_verified_refuses_env_even_when_excluded(self):
         with tempfile.TemporaryDirectory() as temp_root:
             source = Path(temp_root) / "ExcludedRisk"
             source.mkdir()
@@ -82,7 +104,7 @@ class PacklightTests(unittest.TestCase):
                     PacklightOptions(
                         source=source,
                         output=output,
-                        release=True,
+                        verified=True,
                         exclude_patterns=(".env",),
                     )
                 )
@@ -90,7 +112,7 @@ class PacklightTests(unittest.TestCase):
             self.assertIn(".env", str(context.exception))
             self.assertFalse(output.exists())
 
-    def test_release_mode_refuses_credential_like_file_even_when_allowed(self):
+    def test_verified_refuses_credential_like_file_even_when_allowed(self):
         with tempfile.TemporaryDirectory() as temp_root:
             source = Path(temp_root) / "CredentialRisk"
             source.mkdir()
@@ -104,7 +126,7 @@ class PacklightTests(unittest.TestCase):
                     PacklightOptions(
                         source=source,
                         output=output,
-                        release=True,
+                        verified=True,
                         allow_patterns=("secrets/*",),
                     )
                 )
@@ -121,6 +143,7 @@ class PacklightTests(unittest.TestCase):
             result = build_clean_zip(PacklightOptions(source=source, output=output))
 
             self.assertTrue(output.exists())
+            self.assertIsNone(result.verification)
             self.assertTrue(any(item.rel_path == ".env" and item.risky for item in result.skipped))
             with zipfile.ZipFile(output) as archive:
                 self.assertNotIn("Default/.env", archive.namelist())
@@ -139,7 +162,7 @@ class PacklightTests(unittest.TestCase):
                 PacklightOptions(
                     source=source,
                     output=output,
-                    release=True,
+                    verified=True,
                     allow_patterns=(".gitignore", ".well-known/*"),
                 )
             )
@@ -155,13 +178,49 @@ class PacklightTests(unittest.TestCase):
             (source / "README.md").write_text("hello\n", encoding="utf-8")
             output = Path(temp_root) / "dry.zip"
 
-            result = build_clean_zip(PacklightOptions(source=source, output=output, dry_run=True, release=True))
+            result = build_clean_zip(PacklightOptions(source=source, output=output, dry_run=True, verified=True))
 
             self.assertTrue(result.dry_run)
+            self.assertTrue(result.verified)
+            self.assertFalse(output.exists())
+            self.assertFalse(result.audit_files)
+            self.assertEqual([record.rel_path for record in result.files], ["README.md"])
+
+    def test_dry_run_with_audit_files_lists_generated_files(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            source = Path(temp_root) / "Dry"
+            source.mkdir()
+            (source / "README.md").write_text("hello\n", encoding="utf-8")
+            output = Path(temp_root) / "dry.zip"
+
+            result = build_clean_zip(
+                PacklightOptions(source=source, output=output, dry_run=True, verified=True, audit_files=True)
+            )
+
+            self.assertTrue(result.dry_run)
+            self.assertTrue(result.verified)
+            self.assertTrue(result.audit_files)
             self.assertFalse(output.exists())
             self.assertEqual([record.rel_path for record in result.files], ["README.md", MANIFEST_NAME, CHECKSUMS_NAME])
 
-    def test_release_mode_refuses_generated_name_conflicts(self):
+    def test_verified_allows_existing_manifest_names(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            source = Path(temp_root) / "Conflict"
+            source.mkdir()
+            (source / "README.md").write_text("hello\n", encoding="utf-8")
+            (source / MANIFEST_NAME).write_text("existing manifest\n", encoding="utf-8")
+            (source / CHECKSUMS_NAME).write_text("existing checksums\n", encoding="utf-8")
+            output = Path(temp_root) / "manifest-names.zip"
+
+            build_clean_zip(PacklightOptions(source=source, output=output, verified=True))
+
+            with zipfile.ZipFile(output) as archive:
+                names = archive.namelist()
+
+            self.assertIn(f"Conflict/{MANIFEST_NAME}", names)
+            self.assertIn(f"Conflict/{CHECKSUMS_NAME}", names)
+
+    def test_audit_files_refuse_generated_name_conflicts(self):
         with tempfile.TemporaryDirectory() as temp_root:
             source = Path(temp_root) / "Conflict"
             source.mkdir()
@@ -170,9 +229,21 @@ class PacklightTests(unittest.TestCase):
             output = Path(temp_root) / "conflict.zip"
 
             with self.assertRaises(PacklightError) as context:
-                build_clean_zip(PacklightOptions(source=source, output=output, release=True))
+                build_clean_zip(PacklightOptions(source=source, output=output, verified=True, audit_files=True))
 
             self.assertIn(MANIFEST_NAME, str(context.exception))
+            self.assertFalse(output.exists())
+
+    def test_legacy_release_option_still_enables_verified_checks(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            source = Path(temp_root) / "Legacy"
+            _write_fixture(source, include_secret=True)
+            output = Path(temp_root) / "legacy.zip"
+
+            with self.assertRaises(PacklightError) as context:
+                build_clean_zip(PacklightOptions(source=source, output=output, release=True))
+
+            self.assertIn(".env", str(context.exception))
             self.assertFalse(output.exists())
 
     def test_invalid_root_names_raise_packlight_error_without_writing_zip(self):

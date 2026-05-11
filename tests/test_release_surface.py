@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import plistlib
 import shutil
 import subprocess
@@ -57,7 +58,7 @@ class PacklightReleaseSurfaceTests(unittest.TestCase):
         )
         self.assertIn("packlight", version.stdout)
 
-    def test_help_uses_recipient_ready_positioning(self):
+    def test_help_uses_understated_positioning(self):
         completed = subprocess.run(
             [sys.executable, "-m", "packlight", "--help"],
             cwd=PROJECT_ROOT,
@@ -68,7 +69,77 @@ class PacklightReleaseSurfaceTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("packlight", completed.stdout)
-        self.assertIn("recipient-ready ZIP archives", completed.stdout)
+        self.assertIn("Create ZIP archives from local folders", completed.stdout)
+        self.assertIn("--verified", completed.stdout)
+        self.assertNotIn("--release", completed.stdout)
+
+    def test_cli_audit_files_flag_adds_manifest_and_checksums(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            source = Path(temp_root) / "Audit"
+            source.mkdir()
+            (source / "README.md").write_text("hello\n", encoding="utf-8")
+            output = Path(temp_root) / "audit.zip"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "packlight",
+                    str(source),
+                    "--output",
+                    str(output),
+                    "--audit-files",
+                    "--json",
+                ],
+                cwd=PROJECT_ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(completed.stdout)
+            self.assertTrue(result["verified"])
+            self.assertTrue(result["release"])
+            self.assertTrue(result["audit_files"])
+
+            with zipfile.ZipFile(output) as archive:
+                names = archive.namelist()
+
+            self.assertIn("Audit/MANIFEST.txt", names)
+            self.assertIn("Audit/SHA256SUMS", names)
+
+    def test_legacy_release_flag_still_works(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            source = Path(temp_root) / "Legacy"
+            source.mkdir()
+            (source / "README.md").write_text("hello\n", encoding="utf-8")
+            output = Path(temp_root) / "legacy.zip"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "packlight",
+                    str(source),
+                    "--output",
+                    str(output),
+                    "--release",
+                    "--json",
+                ],
+                cwd=PROJECT_ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(completed.stdout)
+            self.assertTrue(result["verified"])
+            self.assertTrue(result["release"])
+            self.assertTrue(output.is_file())
 
     def test_finder_wrapper_uses_packlight_command_and_env(self):
         script = (PROJECT_ROOT / "macos" / "create-packlight-zip.sh").read_text(encoding="utf-8")
@@ -77,7 +148,9 @@ class PacklightReleaseSurfaceTests(unittest.TestCase):
         self.assertIn("command -v packlight", script)
         self.assertIn("PACKLIGHT_PROJECT_ROOT", script)
         self.assertIn("-m packlight", script)
-        self.assertIn("--release --force", script)
+        self.assertIn("--force", script)
+        self.assertNotIn("--verified --force", script)
+        self.assertNotIn("--release --force", script)
         self.assertIn("/usr/bin/osascript", script)
         self.assertIn("Packlight could not create the ZIP", script)
         self.assertIn("risky files", script)
@@ -218,12 +291,12 @@ class PacklightReleaseSurfaceTests(unittest.TestCase):
             self.assertIn("Finder Test Ω/README.md", names)
             self.assertIn("Finder Test Ω/nested/file.txt", names)
             self.assertIn("Finder Test Ω/unicode/résumé.txt", names)
-            self.assertIn("Finder Test Ω/MANIFEST.txt", names)
-            self.assertIn("Finder Test Ω/SHA256SUMS", names)
+            self.assertNotIn("Finder Test Ω/MANIFEST.txt", names)
+            self.assertNotIn("Finder Test Ω/SHA256SUMS", names)
             self.assertNotIn("Finder Test Ω/.DS_Store", names)
             self.assertNotIn("Finder Test Ω/old.zip", names)
 
-    def test_direct_wrapper_failure_returns_nonzero_and_keeps_existing_zip(self):
+    def test_direct_wrapper_skips_secret_like_file_and_replaces_existing_zip(self):
         zsh = shutil.which("zsh")
         if not zsh:
             self.skipTest("zsh is not available")
@@ -234,8 +307,7 @@ class PacklightReleaseSurfaceTests(unittest.TestCase):
             (source / "README.md").write_text("hello\n", encoding="utf-8")
             (source / ".env").write_text("SECRET=1\n", encoding="utf-8")
             output = source.with_suffix(".zip")
-            original_zip = b"existing good zip"
-            output.write_bytes(original_zip)
+            output.write_bytes(b"existing zip")
 
             env = {
                 "HOME": str(Path.home()),
@@ -255,27 +327,24 @@ class PacklightReleaseSurfaceTests(unittest.TestCase):
             )
 
             combined = completed.stdout + completed.stderr
-            self.assertEqual(completed.returncode, 1, combined)
-            self.assertIn("risky files were found", combined)
-            self.assertIn(".env: secret-like configuration file", combined)
-            self.assertEqual(output.read_bytes(), original_zip)
+            self.assertEqual(completed.returncode, 0, combined)
+            with zipfile.ZipFile(output) as archive:
+                names = archive.namelist()
 
-    def test_finder_gui_mode_failure_returns_zero_and_keeps_existing_zip(self):
+            self.assertIn("Finder Test/README.md", names)
+            self.assertNotIn("Finder Test/.env", names)
+
+    def test_finder_gui_mode_reports_selected_non_folder(self):
         zsh = shutil.which("zsh")
         if not zsh:
             self.skipTest("zsh is not available")
 
         with tempfile.TemporaryDirectory() as temp_root:
             good_source = Path(temp_root) / "Good Folder"
-            risky_source = Path(temp_root) / "Risky Folder"
+            selected_file = Path(temp_root) / "not a folder.txt"
             good_source.mkdir()
-            risky_source.mkdir()
             (good_source / "README.md").write_text("good\n", encoding="utf-8")
-            (risky_source / "README.md").write_text("risky\n", encoding="utf-8")
-            (risky_source / ".env").write_text("SECRET=1\n", encoding="utf-8")
-            risky_output = risky_source.with_suffix(".zip")
-            original_zip = b"existing good zip"
-            risky_output.write_bytes(original_zip)
+            selected_file.write_text("not a folder\n", encoding="utf-8")
 
             env = {
                 "HOME": str(Path.home()),
@@ -290,7 +359,7 @@ class PacklightReleaseSurfaceTests(unittest.TestCase):
                     zsh,
                     str(PROJECT_ROOT / "macos" / "create-packlight-zip.sh"),
                     str(good_source),
-                    str(risky_source),
+                    str(selected_file),
                 ],
                 cwd=PROJECT_ROOT,
                 env=env,
@@ -304,12 +373,9 @@ class PacklightReleaseSurfaceTests(unittest.TestCase):
             combined = completed.stdout + completed.stderr
             self.assertEqual(completed.returncode, 0, combined)
             self.assertIn("Packlight could not create the ZIP", combined)
-            self.assertIn("Packlight stopped because risky files were found", combined)
+            self.assertIn("selected item is not a folder", combined)
             self.assertIn("No ZIP was created or replaced", combined)
-            self.assertIn("risky files were found", combined)
-            self.assertIn(".env: secret-like configuration file", combined)
             self.assertTrue(good_source.with_suffix(".zip").is_file())
-            self.assertEqual(risky_output.read_bytes(), original_zip)
 
     def test_public_source_has_no_old_branding(self):
         excluded_dirs = {".git", ".venv", "__pycache__", "build", "dist", "reports"}

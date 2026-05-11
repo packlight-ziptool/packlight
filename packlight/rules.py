@@ -108,7 +108,7 @@ def explain_default_rules() -> Sequence[str]:
         "development clutter: VCS folders, virtualenvs, caches, node_modules, bytecode",
         "transient artifacts: logs, temp files, swap files, backups, old archive files",
         "hidden files and folders are excluded unless allowed explicitly",
-        "secret-like files and symlinks are risky; release/strict mode refuses them",
+        "secret-like files and symlinks are risky; verified/strict mode refuses them",
     )
 
 

@@ -21,11 +21,14 @@ def main(argv=None) -> int:
     if not args.source:
         parser.error("source is required unless --rules is used")
 
+    verified = args.verified or args.release or args.audit_files
     options = PacklightOptions(
         source=Path(args.source),
         output=Path(args.output) if args.output else None,
         root_name=args.root_name,
+        verified=verified,
         release=args.release,
+        audit_files=args.audit_files,
         strict=args.strict,
         dry_run=args.dry_run,
         force=args.force,
@@ -49,12 +52,18 @@ def main(argv=None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="packlight",
-        description="Create clean, recipient-ready ZIP archives from local folders.",
+        description="Create ZIP archives from local folders while skipping common clutter.",
     )
     parser.add_argument("source", nargs="?", help="folder to package")
     parser.add_argument("-o", "--output", help="destination ZIP path")
     parser.add_argument("--root-name", help="top-level folder name inside the ZIP")
-    parser.add_argument("--release", action="store_true", help="add manifest, SHA256SUMS, and strict verification")
+    parser.add_argument("--verified", action="store_true", help="check risky paths and verify the ZIP before success")
+    parser.add_argument("--release", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--audit-files",
+        action="store_true",
+        help="add MANIFEST.txt and SHA256SUMS inside the ZIP; also runs verified checks",
+    )
     parser.add_argument("--strict", action="store_true", help="refuse risky files instead of only skipping them")
     parser.add_argument("--dry-run", action="store_true", help="show what would be packaged without writing a ZIP")
     parser.add_argument("--explain", action="store_true", help="show included and skipped paths")
@@ -73,7 +82,7 @@ def _format_result(result, *, explain: bool) -> str:
         lines.append("Dry run complete. No ZIP was written.")
         lines.append(f"Output target: {result.output}")
     else:
-        lines.append(f"Clean ZIP created: {result.output}")
+        lines.append(f"ZIP created: {result.output}")
     lines.append(f"Root folder: {result.root_name}/")
     lines.append(f"Included files: {len(result.files)}")
     lines.append(f"Skipped items: {len(result.skipped)}")

@@ -7,9 +7,9 @@ Current generated cases include:
 - macOS metadata: `.DS_Store`, `__MACOSX`, AppleDouble-style sidecars
 - development clutter: `.git`, `__pycache__`, bytecode, temp files
 - old artifacts: existing `.zip` files, logs, backups
-- professional-release risks: `.env`, private-key-like names, symlinks
+- professional handoff risks: `.env`, private-key-like names, symlinks
 - path shape checks: spaces, unicode filenames, nested folders, one-root enforcement
-- release-file conflicts: existing `MANIFEST.txt` and `SHA256SUMS`
+- audit-file conflicts: existing `MANIFEST.txt` and `SHA256SUMS` when audit files are requested
 
 Run:
 

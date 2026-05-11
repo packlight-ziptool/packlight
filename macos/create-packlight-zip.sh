@@ -179,25 +179,23 @@ discover_packlight() {
     warn "configured command is not executable: $PACKLIGHT_EXECUTABLE"
   fi
 
+  local python_bin=""
+  if [ -n "${PACKLIGHT_PROJECT_ROOT:-}" ]; then
+    if [ ! -f "$PACKLIGHT_PROJECT_ROOT/packlight/__main__.py" ]; then
+      fail "PACKLIGHT_PROJECT_ROOT does not point to a Packlight checkout: $PACKLIGHT_PROJECT_ROOT"
+    fi
+    python_bin="$(resolve_python)" || fail "python3 was not found."
+    export PYTHONPATH="$PACKLIGHT_PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+    PACKLIGHT_COMMAND=("$python_bin" -m packlight)
+    return 0
+  fi
+
   if command -v packlight >/dev/null 2>&1; then
     PACKLIGHT_COMMAND=("$(command -v packlight)")
     return 0
   fi
 
-  local python_bin=""
   if python_bin="$(resolve_python 2>/dev/null)" && "$python_bin" -c "import packlight" >/dev/null 2>&1; then
-    PACKLIGHT_COMMAND=("$python_bin" -m packlight)
-    return 0
-  fi
-
-  if [ -n "${PACKLIGHT_PROJECT_ROOT:-}" ]; then
-    if [ ! -f "$PACKLIGHT_PROJECT_ROOT/packlight/__main__.py" ]; then
-      fail "PACKLIGHT_PROJECT_ROOT does not point to a Packlight checkout: $PACKLIGHT_PROJECT_ROOT"
-    fi
-    if [ -z "$python_bin" ]; then
-      python_bin="$(resolve_python)" || fail "python3 was not found."
-    fi
-    export PYTHONPATH="$PACKLIGHT_PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
     PACKLIGHT_COMMAND=("$python_bin" -m packlight)
     return 0
   fi
@@ -211,7 +209,7 @@ run_packlight() {
   local command_output=""
 
   if is_finder_action; then
-    if command_output="$("${PACKLIGHT_COMMAND[@]}" "$source" --output "$output" --release --force 2>&1)"; then
+    if command_output="$("${PACKLIGHT_COMMAND[@]}" "$source" --output "$output" --force 2>&1)"; then
       return 0
     fi
     if [ -n "$command_output" ]; then
@@ -221,7 +219,7 @@ run_packlight() {
     return 1
   fi
 
-  "${PACKLIGHT_COMMAND[@]}" "$source" --output "$output" --release --force
+  "${PACKLIGHT_COMMAND[@]}" "$source" --output "$output" --force
 }
 
 if [ "$#" -eq 0 ]; then
