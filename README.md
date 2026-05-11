@@ -6,6 +6,26 @@ Packlight is built for macOS users who want to Control-click or right-click a fo
 
 Packlight uses only the Python standard library at runtime.
 
+## Quick Install From GitHub
+
+Download the latest release, unpack it, and run the Mac installer:
+
+```bash
+cd ~/Downloads
+curl -L -o packlight-source.zip https://github.com/packlight-ziptool/packlight/releases/latest/download/packlight-source.zip
+unzip -q packlight-source.zip
+cd packlight
+macos/install-packlight.command
+```
+
+Or clone the public repository:
+
+```bash
+git clone https://github.com/packlight-ziptool/packlight.git
+cd packlight
+macos/install-packlight.command
+```
+
 ## What Packlight Does
 
 - creates a single-root ZIP archive from a selected folder
@@ -16,7 +36,7 @@ Packlight uses only the Python standard library at runtime.
 
 ## Install On Mac
 
-Download or clone Packlight, then run the installer:
+From the Packlight folder, run the installer:
 
 ```bash
 macos/install-packlight.command
