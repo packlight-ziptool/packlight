@@ -21,6 +21,7 @@ MAC_NAMES = {
 
 DEV_DIR_NAMES = {
     ".git",
+    ".eggs",
     ".hg",
     ".svn",
     "CVS",
@@ -34,6 +35,7 @@ DEV_DIR_NAMES = {
     "venv",
     "env",
     "node_modules",
+    "pip-wheel-metadata",
     ".next",
     ".parcel-cache",
     ".turbo",
@@ -42,7 +44,13 @@ DEV_DIR_NAMES = {
     "htmlcov",
 }
 
+DEV_DIR_SUFFIXES = (
+    ".dist-info",
+    ".egg-info",
+)
+
 EXCLUDED_SUFFIXES = (
+    ".egg-link",
     ".pyc",
     ".pyo",
     ".log",
@@ -122,6 +130,7 @@ def decide_path(
     rel_path = rel_path.replace("\\", "/")
     basename = PurePosixPath(rel_path).name
     parts = PurePosixPath(rel_path).parts
+    lower_name = basename.lower()
 
     if _has_control_character(rel_path):
         return Decision("risky", "filename contains a control character", "unsafe-name")
@@ -149,7 +158,7 @@ def decide_path(
             return Decision("exclude", "macOS metadata", "macos-metadata")
 
     if is_dir:
-        if basename in DEV_DIR_NAMES:
+        if basename in DEV_DIR_NAMES or any(lower_name.endswith(suffix) for suffix in DEV_DIR_SUFFIXES):
             return Decision("exclude", "development cache or metadata directory", "dev-directory")
         if basename.startswith("."):
             return Decision("exclude", "hidden directory", "hidden-directory")
@@ -158,7 +167,6 @@ def decide_path(
     if basename.startswith("."):
         return Decision("exclude", "hidden file", "hidden-file")
 
-    lower_name = basename.lower()
     if any(lower_name.endswith(suffix) for suffix in EXCLUDED_SUFFIXES):
         return Decision("exclude", "transient or archive artifact", "transient-artifact")
 

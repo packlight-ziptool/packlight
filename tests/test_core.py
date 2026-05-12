@@ -148,6 +148,50 @@ class PacklightTests(unittest.TestCase):
             with zipfile.ZipFile(output) as archive:
                 self.assertNotIn("Default/.env", archive.namelist())
 
+    def test_python_package_metadata_is_skipped(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            source = Path(temp_root) / "Package"
+            source.mkdir()
+            (source / "README.md").write_text("hello\n", encoding="utf-8")
+            (source / "src").mkdir()
+            (source / "src" / "app.py").write_text("print('clean')\n", encoding="utf-8")
+            egg_info = source / "src" / "poa_validator_foundation.egg-info"
+            egg_info.mkdir()
+            (egg_info / "PKG-INFO").write_text("generated metadata\n", encoding="utf-8")
+            dist_info = source / "src" / "poa_validator_foundation-0.1.0.dist-info"
+            dist_info.mkdir()
+            (dist_info / "WHEEL").write_text("generated metadata\n", encoding="utf-8")
+            eggs = source / ".eggs"
+            eggs.mkdir()
+            (eggs / "dependency.egg").write_text("generated metadata\n", encoding="utf-8")
+            wheel_metadata = source / "pip-wheel-metadata"
+            wheel_metadata.mkdir()
+            (wheel_metadata / "packlight.json").write_text("{}\n", encoding="utf-8")
+            (source / "src" / "packlight.egg-link").write_text("../packlight\n", encoding="utf-8")
+            output = Path(temp_root) / "package.zip"
+
+            result = build_clean_zip(PacklightOptions(source=source, output=output, verified=True))
+
+            skipped = {item.rel_path: item.rule for item in result.skipped}
+            self.assertEqual(skipped["src/poa_validator_foundation.egg-info"], "dev-directory")
+            self.assertEqual(skipped["src/poa_validator_foundation-0.1.0.dist-info"], "dev-directory")
+            self.assertEqual(skipped[".eggs"], "dev-directory")
+            self.assertEqual(skipped["pip-wheel-metadata"], "dev-directory")
+            self.assertEqual(skipped["src/packlight.egg-link"], "transient-artifact")
+            with zipfile.ZipFile(output) as archive:
+                names = archive.namelist()
+
+            self.assertIn("Package/src/app.py", names)
+            self.assertNotIn("Package/src/poa_validator_foundation.egg-info/", names)
+            self.assertNotIn("Package/src/poa_validator_foundation.egg-info/PKG-INFO", names)
+            self.assertNotIn("Package/src/poa_validator_foundation-0.1.0.dist-info/", names)
+            self.assertNotIn("Package/src/poa_validator_foundation-0.1.0.dist-info/WHEEL", names)
+            self.assertNotIn("Package/.eggs/", names)
+            self.assertNotIn("Package/.eggs/dependency.egg", names)
+            self.assertNotIn("Package/pip-wheel-metadata/", names)
+            self.assertNotIn("Package/pip-wheel-metadata/packlight.json", names)
+            self.assertNotIn("Package/src/packlight.egg-link", names)
+
     def test_allow_pattern_can_include_intentional_dotfile(self):
         with tempfile.TemporaryDirectory() as temp_root:
             source = Path(temp_root) / "Allowed"
